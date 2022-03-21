@@ -1,0 +1,543 @@
+---
+title: "Carbon Lock-in "
+author: "Aman Malik and Christoph Bertram"
+output: 
+  html_document:
+    theme: paper
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+```{r global settings, include=FALSE}
+# setting global settings for knitr
+# echo=TRUE/FALSE whether to include R source code in the output file
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.path = "figure-carbonlockin/",cache = T,echo=F,fig.retina = 1)
+```
+```{r req packages,message=FALSE, warning=FALSE, include=FALSE,results='hide'}
+library(quitte)
+library(moinput)
+library(tidyverse)
+library(reshape)
+library(data.table)
+library(RColorBrewer)
+library(knitr)
+library(mip)
+```
+
+```{r input data file}
+  load("Doc/data_IND2019_05_09.RData")
+```
+
+```{r historical data international Data file}
+load("Data/HistandBotmup.RData")
+```
+
+```{r historical data national}
+### historical data from various government sources: CEA reports, MNRE, NITI AAYOG
+hist_IND <- readxl::read_excel("Data/Compiled_historical.xlsx")
+hist_IND <- as.quitte(hist_IND)
+#hist_IND$type <- "historical"
+```
+### AIM ENDUSE capacity
+```{r AIM_Enduse coal capacity,warning=FALSE,fig.show='hold'}
+### Capacity|Electricity|Coal|w/o CCS for AIM ENDUSE for Delayed action is not given. Calculating the capacity factor for delay scenario and using it for early scenario.
+
+whole_coal_cap <- whole %>% filter(variable %in% c("Capacity|Electricity|Coal|w/o CCS","Secondary Energy|Electricity|Coal|w/o CCS"),model %in% c("AIM/Enduse"),scen_name=="Early action") 
+
+whole_coal_cap <- calc_addVariable(whole_coal_cap, "Capacity Factor|Electricity|Coal|w/o CCS" = "`Secondary Energy|Electricity|Coal|w/o CCS` / `Capacity|Electricity|Coal|w/o CCS` * 31.71")
+
+whole_coal_cap_2 <- whole %>% filter(variable %in% c("Capacity|Electricity|Coal|w/o CCS","Secondary Energy|Electricity|Coal|w/o CCS"),model %in% c("AIM/Enduse 3.0"),scen_name=="Delayed action")
+
+whole_coal_cap_2 <- rbind(whole_coal_cap_2,whole_coal_cap %>% filter(variable=="Capacity Factor|Electricity|Coal|w/o CCS"))
+
+whole_coal_cap_2 <- calc_addVariable(whole_coal_cap, "Capacity|Electricity|Coal|w/o CCS" = "`Secondary Energy|Electricity|Coal|w/o CCS` / `Capacity Factor|Electricity|Coal|w/o CCS` *31.71 ",units = "GW",only.new = T)
+whole_coal_cap_2$scen_name <- "Delayed action"
+whole_coal_cap_2$scenario <- "INDC2030_low_V3"
+whole_coal_cap_2$modscen <- "AIM/Enduse 3.0 - INDC2030_low_V3"
+
+whole <- bind_rows(whole,whole_coal_cap_2)
+
+```
+
+### Capacity Hydro
+```{r}
+whole_cap_elec_hydro <- whole %>% filter(variable %in% c("Capacity|Electricity|Hydro"),scen_name!="NDC") 
+
+IND_proj <- data.frame(period=c(2022,2027),value=c(51.301,63.301))
+IND_proj$type <- "CEA_projections"
+
+ggplot()+
+   geom_line(data = whole_cap_elec_hydro %>% filter(period<2051),mapping = aes(x=period,y=value,group=interaction(model,scen_name),color=scen_name))+
+facet_wrap(model_scope~model)
+
+
+
+
+ggplot()+
+  geom_line(data = whole_cap_elec_hydro %>% filter(period %in% c(2005:2050)), aes(x=period,y=value,group=interaction(model,scen_name),color=model))+
+  facet_grid(model_scope~scen_name)+
+ labs(
+    x = "Year",
+    y = "Capacity|Electricity|Hydro (GW)"
+    )+ theme(strip.text.x = element_text(angle = 90,size = 8),axis.text.x = element_text(angle = 90, hjust = 1))+
+     geom_point(hist_IND %>% group_by(model,variable) %>% filter(variable=="Capacity|Electricity|Hydro",model=="CEA_ANNUAL",period%in%c(2005:2018)),mapping = aes(x=period, y= value/1000,shape=type))+
+  geom_point(IND_proj ,mapping = aes(x=period,y=value,shape=type),color="blue")
+
+``````
+
+
+### Seconday Energy gas
+```{r SE_gas,message=FALSE,warning=FALSE}
+# SE|Gas|Electricity
+whole_se_elec_gas <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Gas|w/o CCS"))
+# Pg 149 of CEA_NEP for plant load factor for gas
+hist_se_elec_gas <- hist_and_botmup %>% filter(region=="IND", period %in% c(2005:2015), variable=="SE|Electricity|Gas (EJ/yr)")
+
+IND_proj <- data.frame(period=c(2022,2027),value=c(25.735*8760*0.37*0.0000036,25.735*8760*0.37*0.0000036),type="CEA_projections")
+
+hist_IND$type <- "historical"
+ggplot()+
+  geom_line(data =whole_se_elec_gas %>% filter(period<2050) , aes(x=period,y=value,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
+  facet_grid(scen_name~.)+
+  geom_point(hist_IND %>% filter(variable=="Secondary Energy|Electricity|Gas"),mapping = aes(x = period,y=value*0.00356,shape=type),shape="triangle")+
+ labs(x = "Year",
+    y = "Power generation from unabated gas (EJ/yr)" )+ theme_bw()+
+   geom_point(IND_proj ,mapping = aes(x=period,y=value,shape=type),color="blue")+theme_bw()+scale_size_manual(values=c(1,1.5))+coord_cartesian(xlim=c(2010,2030),ylim=c(0,3))
+  
+```
+### Capacity solar
+```{r}
+whole_cap_solar <- whole %>% filter(variable %in% c("Capacity|Electricity|Solar" ))
+
+whole_cap_solar_1 <- whole_cap_solar %>% 
+    filter(scen_name=="Delayed action") %>% 
+  group_by(modscen,scen_name)
+
+whole_cap_solar_2 <- whole_cap_solar %>% 
+  filter(scen_name=="Early action") %>% 
+  group_by(modscen,scen_name)
+
+try_bl <- bind_cols(whole_cap_solar_1,whole_cap_solar_2) %>% group_by(model,period)%>%
+  mutate(difference=value1-value)
+
+try_bl <- try_bl[,c(1:8,21)] 
+try_bl$scen_name <- "difference"
+names(try_bl)[9] <- "value"
+
+whole_cap_solar_3 <- bind_rows(whole_cap_solar,try_bl)
+
+ggplot()+
+  geom_line(data = whole_cap_solar_3 %>% filter(period<2051), aes(x=period,y=value,group=interaction(model,scen_name),color=model))+
+  facet_grid(model_scope~scen_name,scales = "free")+
+ labs(
+    x = "Year",
+    y = "Capacity|Electricity|Solar (GW)"
+    )+
+  coord_cartesian(ylim=c(0,500))+
+   geom_point(hist_IND %>% filter(variable=="Capacity|Electricity|Solar",model %in% c("CEA_MON","CEA_ANNUAL","CEA_NEP"),period %in% c(2015:2027)),mapping = aes(x=period,y=value/1000,shape=scenario))
+```
+### Capacity Wind
+```{r}
+whole_cap_wind <- whole %>% filter(variable %in% c("Capacity|Electricity|Wind" ))
+
+whole_cap_wind_1 <- whole_cap_wind %>% 
+    filter(scen_name=="Delayed action") %>% 
+  group_by(modscen,scen_name)
+
+whole_cap_wind_2 <- whole_cap_wind %>% 
+  filter(scen_name=="Early action") %>% 
+  group_by(modscen,scen_name)
+
+try_bl <- bind_cols(whole_cap_wind_1,whole_cap_wind_2) %>% group_by(model,period)%>%
+  mutate(difference=value1-value)
+
+try_bl <- try_bl[,c(1:8,21)] 
+try_bl$scen_name <- "difference"
+names(try_bl)[9] <- "value"
+
+whole_cap_wind_3 <- bind_rows(whole_cap_wind,try_bl)
+
+ggplot()+
+  geom_line(data = whole_cap_wind_3 %>% filter(period<2051), aes(x=as.factor(period),y=value,group=interaction(model,scen_name),color=model))+
+  facet_grid(model_scope~scen_name,scales = "free")+
+ labs(
+    x = "Year",
+    y = "Capacity|Electricity|Wind (GW)"
+    )+
+  coord_cartesian(ylim=c(0,500))
++
+   geom_point(hist_IND %>% filter(variable=="Capacity|Electricity|Wind",model %in% c("CEA_MON","CEA_ANNUAL","CEA_NEP"),period %in% c(2015:2027)),mapping = aes(x=as.factor(period),y=value/1000,shape=scenario))
+              
+  
+```
+
+### Secondary Energy Solar
+```{r}
+whole_se_solar <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Solar" ))
+
+whole_se_elec_solar_del <- whole_se_solar %>% 
+    filter(scen_name=="Delayed action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_solar_ear <- whole_se_solar %>% 
+  filter(scen_name=="Early action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_solar_diff <- bind_cols(whole_se_elec_solar_del,whole_se_elec_solar_ear) %>% group_by(model,period)%>%
+  mutate(difference=value1-value)
+# 
+# whole_se_elec_solar_diff <- calc_difference(whole_se_elec_solar_del,dim="period",entry=2015,suffix = "|diffrelTo2015")%>% 
+#   mutate(value= ((value/0.0276)^1/(period-2015))-1) %>% 
+#   filter(period %in% c(2020,2025,2030))
+
+
+
+whole_se_elec_solar_diff <- whole_se_elec_solar_diff[,c(1:8,21)] 
+whole_se_elec_solar_diff$scen_name <- "difference"
+names(whole_se_elec_solar_diff)[9] <- "value"
+
+whole_se_elec_solar_all <- bind_rows(whole_se_solar,whole_se_elec_solar_diff)
+whole_se_elec_solar_all <- factor.data.frame(whole_se_elec_solar_all)
+
+## changes for AIM enduse 
+whole_se_elec_solar_all[whole_se_elec_solar_all$model=="AIM/Enduse",]$value <- whole_se_elec_solar_all[whole_se_elec_solar_all$model=="AIM/Enduse",]$value/3
+
+ggplot()+
+  geom_line(data = whole_se_elec_solar_all %>% filter(period %in% c(2010:2030)), aes(x=period,y=value,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
+  scale_size_manual(values=c(1, 1.5))+
+  facet_grid(scen_name~.)+
+  # coord_cartesian(ylim=c(0,3))+
+  labs(
+    x = "Year",
+    y = "Secondary Energy|Electricity|Solar (EJ)"
+    )+
+  geom_point(hist_IND%>% filter(variable=="Secondary Energy|Electricity|Solar",model %in% c("CEA_MON","CEA_ANNUAL","CEA_NEP"),period %in% c(2015:2027)),mapping = aes(x=period,y=value*0.0036,shape=scenario))+theme_bw()
+
+ggplot()+
+  geom_boxplot(varwidth=T,whole_se_elec_solar_diff%>% filter(period %in% c(2020,2025,2030),scen_name=="Delayed action"),mapping = aes(x=as.factor(period),y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="",subtitle = "Growth rate relative to 2015 (%)")
+
+ggplot()+
+  geom_boxplot(varwidth=T, whole_se_elec_solar_all%>% filter(period %in% c(2025,2030),scen_name=="difference"),mapping = aes(x=as.factor(period),y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="",subtitle = "Difference between early and delay")
+
+```
+### Secondary Energy Wind
+```{r}
+whole_se_wind <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Wind" ))
+
+whole_se_elec_wind_del <- whole_se_wind %>% 
+    filter(scen_name=="Delayed action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_wind_ear <- whole_se_wind %>% 
+  filter(scen_name=="Early action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_wind_diff <- bind_cols(whole_se_elec_wind_del,whole_se_elec_wind_ear) %>% group_by(model,period)%>%
+  mutate(difference=value1-value)
+
+whole_se_elec_wind_diff <- whole_se_elec_wind_diff[,c(1:8,21)] 
+whole_se_elec_wind_diff$scen_name <- "difference"
+names(whole_se_elec_wind_diff)[9] <- "value"
+
+whole_se_elec_wind_all <- bind_rows(whole_se_wind,whole_se_elec_wind_diff)
+
+## changes for AIM enduse 
+whole_se_elec_wind_all[whole_se_elec_wind_all$model=="AIM/Enduse",]$value <- whole_se_elec_wind_all[whole_se_elec_wind_all$model=="AIM/Enduse",]$value/2
+
+ggplot()+
+  geom_line(data = whole_se_elec_wind_all %>% filter(period %in% c(2010:2030)), aes(x=period,y=value,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
+  facet_grid(scen_name~.)+
+  # coord_cartesian(ylim=c(0,1.5))+
+  labs(
+    x = "Year",
+    y = "Secondary Energy|Electricity|Wind (EJ)"
+    )+
+ geom_point(hist_IND%>% filter(variable=="Secondary Energy|Electricity|Wind",model %in% c("CEA_ANNUAL","CEA_NEP"),period %in% c(2015:2027)),mapping = aes(x=period,y=value*0.0036,shape=scenario))+theme_bw()+scale_size_manual(values=c(1, 1.5))
+
+ggplot()+
+  geom_boxplot(varwidth=T, whole_se_elec_wind_all%>% filter(period %in% c(2025,2030),scen_name=="Delayed action"),mapping = aes(x=as.factor(period),y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="",subtitle = "Growth of Wind")
+
+ggplot()+
+  geom_line(data = whole_se_elec_wind_all %>% filter(period %in% c(20)), aes(x=period,y=value,group=interaction(model,scen_name),color=model))+
+  facet_grid(model_scope~scen_name,scales = "free")+
+  coord_cartesian(ylim=c(0,2))+
+  labs(
+    x = "Year",
+    y = "Secondary Energy|Electricity|Wind (EJ)"
+    )+
+  
+
+ggplot()+
+  geom_boxplot(varwidth=T, whole_se_elec_wind_all%>% filter(period %in% c(2025,2030),scen_name=="difference"),mapping = aes(x=as.factor(period),y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="",subtitle = "Difference wind")
+
+```
+
+
+### Secondary Energy coal
+```{r SE_coal, message=FALSE,warning=FALSE}
+
+# source("plotstyle.R")
+# SE elec coal data from models
+whole_se_elec_coal <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Coal|w/o CCS")) 
+
+# converting character variables to factors
+whole_se_elec_coal <- factor.data.frame(whole_se_elec_coal)
+
+# normalisaing values relative to 2010 (default for the function)
+# and storing in new data frame
+whole_se_elec_coal_norm <- calc_normalize(whole_se_elec_coal)
+
+# Adding additional row to calculate normalised values (rel. to 2010) for projected data
+hist_IND <- add_row(hist_IND,model="OWN",scenario="projection",region="IND",variable="Secondary Energy|Electricity|Coal",unit="GWh",period=as.integer(2010),value=as.numeric(616000))
+
+# converting chr variables to factors
+hist_IND <- factor.data.frame(hist_IND)
+
+# normalisaing historical values relative to 2010 (default for the function) and storing in new data frame
+hist_IND_norm <- calc_normalize(hist_IND)
+
+### DIFFERENCE BETWEEN EARLY AND DELAY
+whole_se_elec_coal_del <- whole_se_elec_coal %>% 
+    filter(scen_name=="Delayed action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_coal_ear <- whole_se_elec_coal %>% 
+  filter(scen_name=="Early action") %>% 
+  group_by(modscen,scen_name)
+
+whole_se_elec_coal_diff <- bind_cols(whole_se_elec_coal_del,whole_se_elec_coal_ear) %>% group_by(model,period)%>%
+  mutate(difference=value-value1)
+
+whole_se_elec_coal_diff <- whole_se_elec_coal_diff[,c(1:8,21)] 
+whole_se_elec_coal_diff$scen_name <- "Difference"
+names(whole_se_elec_coal_diff)[9] <- "value"
+
+whole_se_elec_coal_all <- bind_rows(whole_se_elec_coal,whole_se_elec_coal_diff)
+whole_se_elec_coal_all <- factor.data.frame(whole_se_elec_coal_all) %>% order.levels(scen_name=c("Delayed action","Early action","Difference"))
+
+
+### SIMPLE PLOTS
+
+ggplot()+
+  geom_line(data = whole_se_elec_coal_norm %>% filter(period %in% c(2010:2030)), aes(x=as.factor(period),y=value,group=interaction(model,scen_name),color=model,linetype=model_scope))+
+ labs(
+    x = "Year",
+    y = "Secondary Energy|Electricity|Coal|w/o CCS (EJ/yr)"
+    )+ theme(strip.text.x = element_text(size = 8),axis.text.x = element_text(angle = 90, hjust = 1))+
+  facet_wrap("scen_name")
+  
+
+ggplot()+
+  geom_line(data = whole_se_elec_coal_all %>% filter(period %in% c(2010:2050)), aes(x=period,y=value,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
+ labs(
+    x = "Year",
+    y = "Power generation from unabated coal (EJ/yr)"
+    )+ theme(strip.text.x = element_text(size = 8),axis.text.x = element_text(angle = 90, hjust = 1))+
+  facet_grid(scen_name~.)+
+   scale_size_manual(values=c(1, 1.5))+theme_bw()+
+  coord_cartesian(xlim=c(2010,2050),ylim=c(-0.5,7.5))+
+  theme(panel.spacing = unit(0.7, "lines"))+
+  scale_color_manual(values=myColors)
+  
+
+### NORMALISATION PLOTS
+
+ggplot()+
+  geom_line(whole_se_elec_coal_norm %>% filter(period %in% c(2010:2030),scen_name=="Delayed action"), mapping = aes(x=period,y=value,group=interaction(modscen),color=model,linetype=model_scope,size=model_scope))+ 
+  geom_point(hist_IND_norm %>% group_by(model,variable) %>% filter(variable == "Secondary Energy|Electricity|Coal|indexed",model %in% c("OWN","CEA_growth")), mapping = aes(x=period, y= value,shape=scenario))+
+  labs(x = "Year",
+       y = "Normalised to 2010 values",
+      subtitle = "Secondary Energy of electricity - coal")+
+  #coord_cartesian(xlim=c(2030,2050))+
+  scale_size_manual(values=c(1, 1.5))+theme_bw()+scale_colour_manual(values=myColors)
+ggplot()+
+  geom_line(whole_se_elec_coal_norm %>% filter(period %in% c(2010:2030),scen_name=="Delayed action"), mapping = aes(x=period,y=value,group=interaction(modscen),color=model,linetype=model_scope,size=model_scope))+ 
+  geom_point(hist_IND_norm %>% group_by(model,variable) %>% filter(variable == "Secondary Energy|Electricity|Coal|indexed",model %in% c("OWN","CEA_growth")), mapping = aes(x=period, y= value,shape=scenario))+
+  labs(x = "Year",
+       y = "Normalised to 2010 values",
+      subtitle = "Secondary Energy of electricity - coal")+
+  #coord_cartesian(xlim=c(2030,2050))+
+  scale_size_manual(values=c(1, 1.5))+theme_bw()+scale_colour_manual(values=myColors)
+
+### BOX PLOTS
+### box plot for normalised values
+ggplot()+
+  geom_boxplot(varwidth=T, whole_se_elec_coal_norm %>% filter(period %in% c(2030,2050),scen_name=="Delayed action"),mapping = aes(x=period,y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="")
+
+### box plots for difference values
+
+ggplot()+
+  geom_boxplot(varwidth=T, whole_se_elec_coal_all%>% filter(period %in% c(2035,2040,2045,2050),scen_name=="difference"),mapping = aes(x=as.factor(period),y=value,group=interaction(model_scope,period),fill=model_scope))+
+  labs(x="",y="",subtitle = "Difference in coal power generation: Delayed action-Early action")
+```
+### Share of solar and wind in generation
+```{r SE by source,message=FALSE,warning=FALSE}
+### all tech
+plotvar_1 <- c("Secondary Energy|Electricity|Biomass|w/ CCS",
+             "Secondary Energy|Electricity|Biomass|w/o CCS",
+             "Secondary Energy|Electricity|Other",
+             "Secondary Energy|Electricity|Geothermal",
+             "Secondary Energy|Electricity|Ocean",
+             "Secondary Energy|Electricity|Oil",
+             "Secondary Energy|Electricity|Hydro",
+             "Secondary Energy|Electricity|Nuclear",
+             "Secondary Energy|Electricity|Solar",
+             "Secondary Energy|Electricity|Wind",
+             "Secondary Energy|Electricity|Gas|w/ CCS",
+             "Secondary Energy|Electricity|Gas|w/o CCS",
+             "Secondary Energy|Electricity|Coal|w/ CCS",
+             "Secondary Energy|Electricity|Coal|w/o CCS")
+
+whole_se_elec <- whole %>% filter(variable %in% plotvar_1)
+### Total Secondary Energy of Electricity by adding all SE techs
+whole_se_elec_sum <- whole_se_elec %>% 
+  group_by(model, scenario,unit, period,modscen, model_scope, scen_name,region) %>% 
+  summarise(value=sum(value)) %>% 
+  mutate(variable="Secondary Energy|Electricity")
+
+## changes for AIM enduse 
+whole_se_elec_sum[whole_se_elec_sum$model=="AIM/Enduse 3.0" & whole_se_elec_sum$variable %in% plotvar_2,]$value <- whole_se_elec_sum[whole_se_elec_sum$model=="AIM/Enduse 3.0" & whole_se_elec_sum$variable %in% plotvar_2,]$value/3
+
+## only renewable
+plotvar_2 <- c("Secondary Energy|Electricity|Solar",
+             "Secondary Energy|Electricity|Wind")
+whole_se_elec_sw <- whole %>% filter(variable %in% plotvar_2 )
+
+## changes for AIM enduse 
+whole_se_elec_sw[whole_se_elec_sw$model=="AIM/Enduse 3.0",]$value <- whole_se_elec_sw[whole_se_elec_sw$model=="AIM/Enduse 3.0",]$value/3
+
+whole_se_elec_sw_sum <- whole_se_elec_sw %>% 
+  group_by(model, scenario,unit, period,modscen, model_scope, scen_name,region) %>% 
+  summarise(value=sum(value)) %>% 
+  mutate(variable="Secondary Energy|Electricity|Solar_Wind")
+
+whole_se_elec_combined <- bind_rows(whole_se_elec_sw_sum,whole_se_elec_sum) %>% 
+  group_by(period,modscen)
+# whole_se_elec_combined <- as.quitte(whole_se_elec_combined)
+
+whole_se_elec_combined <- spread(whole_se_elec_combined %>% 
+  group_by(period,modscen),key = variable,value = value) %>% 
+  mutate(share=`Secondary Energy|Electricity|Solar_Wind`/`Secondary Energy|Electricity`) %>% 
+  gather(value,key = variable,9:11)
+
+
+ggplot()+
+  geom_line(data = whole_se_elec_combined %>% filter(period %in% c(2010:2050),variable=="share",scen_name=="Delayed action"), aes(x=period,y=value,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
+ # facet_grid(scen_name~.)+
+ labs(
+    x = "Year",
+    y = "Share of solar and wind to total SE"
+    )+
+  theme_bw()+scale_size_manual(values=c(1, 1.5))+
+  coord_cartesian(xlim=c(2010,2030))
+```
+
+### Net and Gross added capacity for Solar and Wind
+
+```{r capacity addtions}
+plotvar_1 <- c( "Capacity|Electricity|Solar",
+             "Capacity|Electricity|Wind" )
+# Assuming lifetime of 25 years for both solar and wind
+whole_cap_add <- whole %>% filter(variable %in% plotvar_1) %>% 
+  group_by(model, scenario, variable) %>% 
+  mutate(additions=value-lag(value,default = value[1])) %>% 
+  mutate(gross_additions=additions-lag(value,n = 5,default = additions[1]))
+whole_cap_add$period <- whole_cap_add$period - 2.5
+
+
+hist_IND$type <- "IND_historical"
+
+CHN_hist <- data.frame(model= "CHN_historical",
+type="CHN_historical",
+region="CHN",
+variable=c(rep("Capacity Additions|Electricity|Solar",8),rep("Capacity Additions|Electricity|Wind",8)),
+value=c(1.915,1.29,12.48,8.97,17.32,34.13,54.11,44.21,16.65,15.19,15.1,20.05,34.18,16.72,16.53,20.26),
+unit="GW/yr",
+period=c(2011:2018,2011:2018))
+
+IND_proj <- data.frame(model="IND_CEA",region="IND",
+variable=c(rep("Capacity Additions|Electricity|Solar",9),rep("Capacity Additions|Electricity|Wind",9)),
+unit="MW/yr",
+period=c(rep(2019:2027,2)),
+value=c(rep((100-21.651)/4,4),rep(10,5),rep((60-34.056)/4,4),rep(8,5)),
+type="CEA_projections")
+
+## For Solar
+ ggplot()+
+  geom_line(data = whole_cap_add %>% filter(variable=="Capacity|Electricity|Solar",period %in% c(2007.5:2032.5)),aes(x=period,y=additions/5,color=model,linetype=model_scope,size=model_scope))+
+ facet_grid(scen_name~.)+
+   geom_point(data = hist_IND %>% filter(variable=="Capacity Additions|Electricity|Solar",scenario=="historical",period %in% c(2014:2050)),  aes(x=period, y=value/1000,shape=type),color="black")+
+  # geom_line(data = CHN_hist %>% filter(variable=="Capacity Additions|Electricity|Solar"),  aes(x=period, y=value,linetype=type))+
+      geom_point(data = IND_proj %>% filter(variable=="Capacity Additions|Electricity|Solar"),mapping = aes(x = period,y = value,shape=type),color="blue")+
+   labs(y = "Net capacity additions-Solar (GW/yr)", x ="Period")+
+  coord_cartesian(ylim=c(0,50))+
+ scale_size_manual(values=c(1, 1.5))+theme_bw()+
+  scale_color_manual(values = myColors)
+ 
+ ### Wind
+ggplot()+
+  geom_line(data = whole_cap_add %>% filter(variable=="Capacity|Electricity|Wind",period %in% c(2007.5:2032.5)), aes(x=period,y=additions/5,color=model,linetype=model_scope,size=model_scope))+
+ facet_grid(scen_name~.)+
+   geom_point(data = hist_IND %>% filter(variable=="Capacity Additions|Electricity|Wind",period %in% c(2014:2018)),  aes(x=period, y=value/1000,shape=type),color="black")+
+   geom_point(data = IND_proj %>% filter(variable=="Capacity Additions|Electricity|Wind"),mapping = aes(x = period,y = value,shape=type),color="blue")+
+   labs(y = "Net capacity additions-Wind (GW/yr)", x ="Period")+
+  coord_cartesian(ylim=c(0,40))+ scale_size_manual(values=c(1, 1.5))+theme_bw()+
+  scale_color_manual(values = myColors)
+
+  #geom_line(data = CHN_hist %>% filter(variable=="Capacity Additions|Electricity|Wind"),  aes(x=period, y=value,linetype=type))+
+  
+     
+  
+```
+
+### Capacity Factor and Stranded capacity
+
+```{r}
+ # removing observations in whole_se_coal that are not in whole_cap_coal
+
+
+
+whole_stranded_cap <- calc_addVariable(whole_needed_cap, "Stranded Capacity|Electricity|Coal|w/o CCS" = "`Capacity|Electricity|Coal|w/o CCS` - `Needed Capacity|Electricity|Coal|w/o CCS`",units = "GW")
+
+whole_share_stranded_cap <- calc_addVariable(whole_stranded_cap, "Share Stranded Capacity|Electricity|Coal|w/o CCS" = "`Stranded Capacity|Electricity|Coal|w/o CCS` / `Capacity|Electricity|Coal|w/o CCS`",units = "GW")
+
+
+whole_cap_factor<- calc_addVariable(whole_elec, "Capacity Factor|Electricity|Coal|w/o CCS" = "`Secondary Energy|Electricity|Coal|w/o CCS` / `Capacity|Electricity|Coal|w/o CCS` * 31.71",only.new = T)
+ 
+whole_cap_factor <- calc_addVariable(whole_elec,"Capacity Factor|Electricity|Coal|w/o CCS" = "`Secondary Energy|Electricity|Coal|w/o CCS` / `Capacity|Electricity|Coal|w/o CCS` * 31.71")
+
+
+ggplot()+
+  geom_line(data = whole_share_stranded_cap %>% filter(period >2020,variable=="Share Stranded Capacity|Electricity|Coal|w/o CCS", !model %in% c("REMIND-MAgPIE 1.7-3.0","AIM V2.1")),aes(x=period,y=value,group=interaction(model,scen_name),color=model)) +
+   labs(
+    x = "Year" ,
+    y = "Share of stranded capacity to total capacity (GW)",
+    color = "Model Scope",
+    linetype = "Scenario Type"
+  ) +
+  theme_bw()+ 
+  facet_grid(scen_name~model_scope)
+
+ggplot()+
+  geom_line(data = whole_cap_factor %>% filter(period<2051), aes(x=period,y=value,group=interaction(model,scen_name),color=model)) +
+   labs(
+    x = "Year" ,
+    y = "Capacity Factor",
+    color = "Model Scope",
+    linetype = "Scenario Type"
+  ) +
+  theme_bw()+ 
+  facet_grid(scen_name~model_scope)+
+geom_point(data = hist_IND %>% filter(variable=="Capacity Factor|Electricity|Coal"),mapping = aes(y=value/100, x=period,shape=scenario),color="black")
+
+
+
+```
+
