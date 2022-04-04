@@ -12,8 +12,7 @@ output:
 ```{r global_settings, include=FALSE}
 # setting global settings for knitr
 # echo=TRUE/FALSE whether to include R source code in the output file
-# knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(fig.path = "figure-carbonlockin/", cache = T, echo = F, fig.retina = 1)
+knitr::opts_chunk$set(fig.path = "figure-carbonlockin/", cache = T, echo = F, fig.retina = 1, warning = F, message = F)
 ```
 
 ```{r req_packages,message=FALSE, warning=FALSE, include=FALSE,results='hide'}
@@ -26,48 +25,129 @@ library(RColorBrewer)
 library(knitr)
 library(mip)
 library(readxl)
+library(ggpubr)
 ```
 
+<!-- ### Data preperation -->
+
 ```{r input_data_file}
-load("data/data_IND2019_12_02.RData")
+load("Data/data_IND2019_08_12.RData")
 models <- inline.data.frame(
-  "model;                       model.name",
-  "REMIND-MAgPIE 1.7-3.0;         REMIND",
-  "WITCH2016;          WITCH",
-  "AIM/Enduse 3.0;            AIM/Enduse",
-  "IMAGE 3.0;     IMAGE",
-  "POLES CDL;   POLES",
-  "AIM V2.1; AIM",
-  "India MARKAL; India MARKAL",
-  "GEM-E3; GEM_E3",
+  'model;                       model.name',
+  'REMIND-MAgPIE 1.7-3.0;         REMIND',
+  'WITCH2016;          WITCH',
+  'AIM/Enduse 3.0;            AIM/Enduse',
+  'IMAGE 3.0;     IMAGE',
+  'POLES CDL;   POLES',
+  'AIM V2.1; AIM',
+  'India MARKAL; India MARKAL',
+  'GEM-E3; GEM_E3',
   NULL
 )
 
 ## Renaming model names
 whole <- whole %>%
   replace_column(models, model, model.name) %>%
-  filter(scen_name %in% c("Delayed action","Early action")) %>% 
   order.levels(scen_name = c("Delayed action", "Early action")) %>%
   removeColNa() %>%
-  order.levels(model = c("AIM", "IMAGE", "POLES", "GEM_E3", "REMIND", "WITCH", "AIM/Enduse", "India MARKAL"))
-```
+  order.levels(
+    model = c(
+      "AIM",
+      "IMAGE",
+      "POLES",
+      "GEM_E3",
+      "REMIND",
+      "WITCH",
+      "AIM/Enduse",
+      "India MARKAL"
+    )
+  )
 
-### Corrections to AIM/Enduse data
 
-```{r AIM_Enduse_coal_capacity,warning=FALSE,fig.show='hold'}
+
+# Changing AIM/Enduse SE values for solar and wind based on excel sheet sent by Saritha
+
+aim_npi_spv <-
+  c(2.25,
+    1.83,
+    30.36,
+    78.21,
+    984.41,
+    1558.15,
+    1940.17,
+    2229.42,
+    2536.68,
+    2475.69) / 1000 # converting from PJ to EJ
+
+aim_ndc_spv <-
+  c(2.25,
+    1.83,
+    30.36,
+    81.53,
+    385.54,
+    973.31,
+    1350.24,
+    1881.97,
+    2448.31,
+    3051.37) / 1000
+aim_npi_wind <-
+  c(26.96,
+    75.06,
+    138.68,
+    220.33,
+    269.39,
+    337.01,
+    429.57,
+    566.43,
+    617.58,
+    646.49) / 1000
+aim_ndc_wind <-
+  c(26.96,
+    75.06,
+    138.68,
+    252.29,
+    331.13,
+    420.48,
+    430.69,
+    565.02,
+    657.00,
+    748.98) / 1000
+
+whole[whole$model == "AIM/Enduse" &
+        whole$variable == "Secondary Energy|Electricity|Solar" &
+        whole$scen_name == "Early action",]$value <- aim_npi_spv
+
+whole[whole$model == "AIM/Enduse" &
+        whole$variable == "Secondary Energy|Electricity|Solar" &
+        whole$scen_name == "Delayed action",]$value <- aim_ndc_spv
+
+whole[whole$model == "AIM/Enduse" &
+        whole$variable == "Secondary Energy|Electricity|Wind" &
+        whole$scen_name == "Early action",]$value <- aim_npi_wind
+
+whole[whole$model == "AIM/Enduse" &
+        whole$variable == "Secondary Energy|Electricity|Wind" &
+        whole$scen_name == "Delayed action",]$value <- aim_ndc_wind
 
 # Changing AIM/Enduse values for Capacity|Solar
-whole[whole$model == "AIM/Enduse" & whole$variable == "Capacity|Electricity|Solar", ]$value <- whole[whole$model == "AIM/Enduse" & whole$variable == "Capacity|Electricity|Solar", ]$value + whole[whole$model == "AIM/Enduse" & whole$variable == "Capacity|Electricity|Storage", ]$value
-
+whole[whole$model == "AIM/Enduse" &
+        whole$variable == "Capacity|Electricity|Solar",]$value <-
+  whole[whole$model == "AIM/Enduse" &
+          whole$variable == "Capacity|Electricity|Solar",]$value + whole[whole$model == "AIM/Enduse" &
+                                                                           whole$variable == "Capacity|Electricity|Storage",]$value
 ```
 
+
+#### India historical data
 ```{r historical_data}
-load("data/HistandBotmup.RData")
+load("Data/HistandBotmup.RData")
 
 ### historical data from various government sources: CEA reports, MNRE, NITI AAYOG
 hist_IND <- readxl::read_excel("Data/Compiled_historical.xlsx")
 hist_IND <- as.quitte(hist_IND)
 ```
+
+<!-- #### Color palette -->
 
 ```{r}
 ## Specific colours for the model names
@@ -75,175 +155,7 @@ myColors <- brewer.pal(8, name = "Dark2") # for unique colors on models
 names(myColors) <- getModels(whole)
 ```
 
-
-### Fig. 1: Power generation from coal in 2030 Delayed action
-```{r data_wrangling}
-
-whole_se_elec_coal <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Coal|w/o CCS")) 
-
-
-hist_se_elec_coal <- hist_and_botmup %>% filter(region=="IND", period %in% c(2005:2015),  variable=="SE|Electricity|Coal (EJ/yr)")
-
-
-wholeCoal <- whole %>% 
-  filter(variable %in% c("Secondary Energy|Electricity|Coal|w/o CCS")) %>% 
-  select(model, scen_name,value, period) %>% 
-  spread(scen_name, value = value) %>% 
-  mutate(difference = `Early action` - `Delayed action`) %>% 
-  gather(3:5,key = "scen_name",value = "value") %>% 
-  mutate(scen_name = factor(scen_name,levels = c("Delayed action","Early action","difference"))) %>% 
-  mutate(model_scope = if_else(model %in% c("AIM/Enduse", "India MARKAL"),"national","global"))
-
-
-
-whole_se_elec_coal_global <- whole_se_elec_coal%>% 
-  filter(period<2051,scen_name=="Delayed action",model!="GEM_E3") %>% 
-  group_by(period,model_scope) %>% 
-  summarise(minimum=min(value)*277.78,maximum=max(value)*277.78)
-
-```
-
-```{r plotting}
-p <- ggplot() +
-  ### grey lines
-  geom_line(data = wholeCoal %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "global"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name)), size = 0.1, color = "grey", show.legend = F) +
-  ## grey ribbon
-  geom_ribbon(whole_se_elec_coal_global %>% filter(period %in% c(2010:2030), model_scope == "global"),
-    mapping = aes(x = period, ymin = minimum, ymax = maximum, fill = model_scope), alpha = 0.5, fill = "grey", show.legend = F
-  )+
-  ## national models dashed line
-  geom_line(data = wholeCoal %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "national"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model), linetype = 2, size = 1.5)+
-  # Govt. projections
-  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Coal", model %in% c("CEA_NEP", "IESS", "IEM", "CEA_OPT")), mapping = aes(x = period, y = value * 0.001, shape = model),color="blue")+
-  # Govt. historical
-  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Coal", model == "CEA_growth"), mapping = aes(x = period, y = value * 0.001, size = scenario))+  
-  ## Model names on right in light grey
-  geom_text(wholeCoal %>% filter(period == 2030, scen_name == "Delayed action", model_scope == "global") %>% mutate(short_name = substring(model, 1, 1)), mapping = aes(x = 2030.5, y = value * 277.78, label = short_name, fontface = "bold"), color = "grey", size = 3)+
-    scale_size_manual(values = c(1.5, 2.5)) +
-  labs(
-    y = "Power generation from coal w/o CCS (TWh)",
-    size = ""
-  ) +
-  scale_colour_manual(values = myColors, limits = c("AIM/Enduse", "India MARKAL")) +
-  theme_bw()+
-  theme(
-    axis.title = element_text(size = 12), 
-    axis.text = element_text(size = 10),
-    axis.title.x = element_blank(),
-    strip.text.x = element_text(size = 8), 
-    axis.text.x = element_text(angle = 90, hjust = 1)
-  )
-```
-
-### Fig. 2: Power generation from solar and wind in 2030 in Delayed action
-```{r solar_wind,message=FALSE,warning=FALSE}
-
-## Solar 
-whole_se_solar <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Solar" ))
-
-whole_se_solar_global <- whole_se_solar%>% 
-  filter(period<2051,model_scope=="global",scen_name=="Delayed action",model!="GEM_E3") %>% 
-  group_by(period) %>% 
-  summarise(minimum=min(value)*277.78,maximum=max(value)*277.78)
-
-
-q <- ggplot()+
-  ## Grey lines
-  geom_line(data = whole_se_solar %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="global"), mapping = aes(x=period,y=value*277.78,group=interaction(model,scen_name)),size=0.1,color="grey")+
-  ## Grey ribbons
-  geom_ribbon(whole_se_solar_global %>% filter(period %in% c(2010:2030)),mapping = aes(x =period,ymin = minimum,ymax=maximum), alpha = 0.4,fill="grey")+
-  ## national models colored dashed
-  geom_line(data = whole_se_solar %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="national"), aes(x=period,y=value*277.78,group=interaction(model,scen_name),color=model),size=1.5,linetype=2)+
-  ## historical and projections
-  geom_point(hist_IND %>% filter(variable=="Secondary Energy|Electricity|Solar",model %in% c("CEA_MON","CEA_ANNUAL","CEA_NEP","Prayas"),period %in% c(2010:2027)),mapping = aes(x=period,y=value,shape=scenario))+
- ## Grey model names on right
-  geom_text(whole_se_solar %>% filter(period ==2030,scen_name=="Delayed action",model_scope=="global") %>% mutate (short_name= substring(model,1,1)) ,mapping = aes(x=2030.5,y=value*277.78,label=short_name,fontface="bold"),color="grey",size=3.5)+
-  coord_cartesian(ylim=c(0,460))+
-    labs(
-    y = "Power generation from solar (TWh)"
-    )+
-     scale_colour_manual(values=myColors, limits = c("AIM/Enduse", "India MARKAL"))+
-  theme_bw()+
-  theme(axis.title=element_text(size=14),
-        axis.text = element_text(size=14),
-        axis.title.x=element_blank())
-
-q
-##### Wind
-
-whole_se_wind<- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Wind" ))
-
-whole_se_wind_global <- whole_se_wind%>% 
-  filter(period<2051,model_scope=="global",scen_name=="Delayed action",model!="GEM_E3") %>% 
-  group_by(period) %>% 
-  summarise(minimum=min(value)*277.78,maximum=max(value)*277.78)
-
-
-r <- ggplot()+
-  ## Grey lines
-  geom_line(data = whole_se_wind %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="global"), mapping = aes(x=period,y=value*277.78,group=interaction(model,scen_name)),size=0.1,color="grey")+
-  ## Grey ribbons
-  geom_ribbon(whole_se_wind_global %>% filter(period %in% c(2010:2030)),mapping = aes(x =period,ymin = minimum,ymax=maximum), alpha = 0.4,fill="grey")+
-  ## national models colored dashed
-  geom_line(data = whole_se_wind %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="national"), aes(x=period,y=value*277.78,group=interaction(model,scen_name),color=model),size=1.5,linetype=2)+
-  ## historical and projections
-  geom_point(hist_IND %>% filter(variable=="Secondary Energy|Electricity|Wind",model %in% c("CEA_MON","CEA_ANNUAL","CEA_NEP","Prayas"),period %in% c(2010:2027)),mapping = aes(x=period,y=value,shape=scenario))+
- ## Grey model names on right
-  geom_text(whole_se_wind %>% filter(period ==2030,scen_name=="Delayed action",model_scope=="global") %>% mutate (short_name= substring(model,1,1)) ,mapping = aes(x=2030.5,y=value*277.78,label=short_name,fontface="bold"),color="grey",size=3.5)+
-  coord_cartesian(ylim=c(0,460))+
-    labs(
-    y = "Power generation from Wind (TWh)"
-    )+
-     scale_colour_manual(values=myColors, limits = c("AIM/Enduse", "India MARKAL"))+
-  theme_bw()+
-  theme(axis.title=element_text(size=14),
-        axis.text = element_text(size=14),
-        axis.title.x=element_blank())
-
-r
-
-```
-
-
-### Fig. 3: Power generation from gas in 2030 in Delayed action
-```{r}
-whole_se_gas <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Gas" ))
-
-whole_se_gas_global <- whole_se_gas%>% 
-  filter(period<2051,model_scope=="global",scen_name=="Delayed action") %>% 
-  group_by(period) %>% 
-  summarise(minimum=min(value)*277.78,maximum=max(value)*277.78)
-
-
-t <- ggplot()+
-  ## Grey lines
-  geom_line(data = whole_se_gas %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="global"), mapping = aes(x=period,y=value*277.78,group=interaction(model,scen_name)),size=0.1,color="grey")+
-  ## Grey ribbons
-  geom_ribbon(whole_se_gas_global %>% filter(period %in% c(2010:2030)),mapping = aes(x =period,ymin = minimum,ymax=maximum), alpha = 0.4,fill="grey")+
-  ## national models colored dashed
-  geom_line(data = whole_se_gas %>% filter(period %in% c(2010:2030),scen_name=="Delayed action",model_scope=="national"), aes(x=period,y=value*277.78,group=interaction(model,scen_name),color=model),size=1.5,linetype=2)+
-  ## historical and projections
-  geom_point(hist_IND %>% filter(variable=="Secondary Energy|Electricity|Gas",model %in% c("NITI AAYOG",
-"CEA_NEP")),mapping = aes(x=period,y=value*0.001,shape=scenario))+
- ## Grey model names on right
-  geom_text(whole_se_gas %>% filter(period ==2030,scen_name=="Delayed action",model_scope=="global") %>% mutate (short_name= substring(model,1,1)) ,mapping = aes(x=2030.5,y=value*277.78,label=short_name,fontface="bold"),color="grey",size=3.5)+
-  coord_cartesian(ylim=c(0,800))+
-    labs(
-    y = "Power generation from Gas (TWh)"
-    )+
-     scale_colour_manual(values=myColors, limits = c("AIM/Enduse", "India MARKAL"))+
-  theme_bw()+
-  theme(axis.title=element_text(size=14),
-        axis.text = element_text(size=14),
-        axis.title.x=element_blank())
-
-t
-```
-
-
-### Fig. 4: Coal capacity development: natural-retirement pathway and stranded capacity
-
-#### Data wrangling
+<!-- #### Data wrangling for calculating stranded assets -->
 
 ```{r data_input_ch2_part2}
 ## Rescaling Secondary energy and converting to capacity
@@ -360,7 +272,7 @@ ic$scen_name <- "Projections"
 
 # Data from Global Energy Monitor
 input.data <-
-  read_excel("C:/Users/amalik/Owncloud/PhD/DISS/carbon lock-ins/Data/Coal_Swarm_INDIA.xlsx")
+  read_excel("Data/Coal_Swarm_INDIA.xlsx")
 
 input.data <- input.data %>%
   gather(key = "Year", value = "Status", 4:8) %>%
@@ -389,7 +301,178 @@ hist_IND <- readxl::read_excel("Data/Compiled_historical.xlsx")
 hist_IND <- as.quitte(hist_IND)
 ```
 
-#### Figures
+
+### Fig. 1: Power generation from coal in 2030 Delayed action
+```{r data_wrangling}
+
+hist_se_elec_coal <- hist_and_botmup %>% filter(region == "IND", period %in% c(2005:2015), variable == "SE|Electricity|Coal (EJ/yr)")
+
+
+wholeCoal <- whole %>%
+  filter(variable %in% c("Secondary Energy|Electricity|Coal|w/o CCS")) %>%
+  select(model, scen_name, value, period) %>%
+  spread(scen_name, value = value) %>%
+  mutate(difference = `Early action` - `Delayed action`) %>%
+  gather(3:5, key = "scen_name", value = "value") %>%
+  mutate(scen_name = factor(scen_name, levels = c("Delayed action", "Early action", "difference"))) %>%
+  mutate(model_scope = if_else(model %in% c("AIM/Enduse", "India MARKAL"), "national", "global"))
+
+
+
+whole_se_elec_coal_global <-whole %>%
+  filter(variable %in% c("Secondary Energy|Electricity|Coal|w/o CCS")) %>%
+  filter(period < 2051, scen_name == "Delayed action", model != "GEM_E3") %>%
+  group_by(period, model_scope) %>%
+  summarise(minimum = min(value) * 277.78, maximum = max(value) * 277.78)
+```
+
+```{r plotting}
+p <- ggplot() +
+  ### grey lines
+  geom_line(data = wholeCoal %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "global"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name)), size = 0.1, color = "grey", show.legend = F) +
+  ## grey ribbon
+  geom_ribbon(whole_se_elec_coal_global %>% filter(period %in% c(2010:2030), model_scope == "global"),
+    mapping = aes(x = period, ymin = minimum, ymax = maximum, fill = model_scope), alpha = 0.5, fill = "grey", show.legend = F
+  ) +
+  ## national models dashed line
+  geom_line(data = wholeCoal %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "national"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model), linetype = 2, size = 1.5) +
+  # Govt. projections
+  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Coal", model %in% c("CEA_NEP", "IESS", "IEM", "CEA_OPT")), mapping = aes(x = period, y = value * 0.001, shape = model), color = "blue") +
+  # Govt. historical
+  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Coal", model == "CEA_growth"), mapping = aes(x = period, y = value * 0.001, size = scenario)) +
+  ## Model names on right in light grey
+  geom_text(wholeCoal %>% filter(period == 2030, scen_name == "Delayed action", model_scope == "global") %>% mutate(short_name = substring(model, 1, 1)), mapping = aes(x = 2030.5, y = value * 277.78, label = short_name, fontface = "bold"), color = "grey", size = 3) +
+  scale_size_manual(values = c(1.5, 2.5)) +
+  labs(
+    y = "Power generation from coal w/o CCS (TWh)",
+    size = ""
+  ) +
+  scale_colour_manual(values = myColors, limits = c("AIM/Enduse", "India MARKAL")) +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    strip.text.x = element_text(size = 8),
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+p
+```
+
+### Fig. 2: Power generation from solar and wind in 2030 in Delayed action
+```{r solar_wind,message=FALSE,warning=FALSE}
+
+## Solar
+whole_se_solar <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Solar"))
+
+whole_se_solar_global <- whole_se_solar %>%
+  filter(period < 2051, model_scope == "global", scen_name == "Delayed action", model != "GEM_E3") %>%
+  group_by(period) %>%
+  summarise(minimum = min(value) * 277.78, maximum = max(value) * 277.78)
+
+
+q <- ggplot() +
+  ## Grey lines
+  geom_line(data = whole_se_solar %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "global"), mapping = aes(x = period, y = value * 277.78, group = interaction(model, scen_name)), size = 0.1, color = "grey") +
+  ## Grey ribbons
+  geom_ribbon(whole_se_solar_global %>% filter(period %in% c(2010:2030)), mapping = aes(x = period, ymin = minimum, ymax = maximum), alpha = 0.4, fill = "grey") +
+  ## national models colored dashed
+  geom_line(data = whole_se_solar %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "national"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model), size = 1.5, linetype = 2) +
+  ## historical and projections
+  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Solar", model %in% c("CEA_MON", "CEA_ANNUAL", "CEA_NEP", "Prayas"), period %in% c(2010:2027)), mapping = aes(x = period, y = value, shape = scenario)) +
+  ## Grey model names on right
+  geom_text(whole_se_solar %>% filter(period == 2030, scen_name == "Delayed action", model_scope == "global") %>% mutate(short_name = substring(model, 1, 1)), mapping = aes(x = 2030.5, y = value * 277.78, label = short_name, fontface = "bold"), color = "grey", size = 3.5) +
+  coord_cartesian(ylim = c(0, 460)) +
+  labs(
+    y = "Power generation from solar (TWh)"
+  ) +
+  scale_colour_manual(values = myColors, limits = c("AIM/Enduse", "India MARKAL")) +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 14),
+    axis.title.x = element_blank()
+  )
+
+q
+##### Wind
+
+whole_se_wind <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Wind"))
+
+whole_se_wind_global <- whole_se_wind %>%
+  filter(period < 2051, model_scope == "global", scen_name == "Delayed action", model != "GEM_E3") %>%
+  group_by(period) %>%
+  summarise(minimum = min(value) * 277.78, maximum = max(value) * 277.78)
+
+
+r <- ggplot() +
+  ## Grey lines
+  geom_line(data = whole_se_wind %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "global"), mapping = aes(x = period, y = value * 277.78, group = interaction(model, scen_name)), size = 0.1, color = "grey") +
+  ## Grey ribbons
+  geom_ribbon(whole_se_wind_global %>% filter(period %in% c(2010:2030)), mapping = aes(x = period, ymin = minimum, ymax = maximum), alpha = 0.4, fill = "grey") +
+  ## national models colored dashed
+  geom_line(data = whole_se_wind %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "national"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model), size = 1.5, linetype = 2) +
+  ## historical and projections
+  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Wind", model %in% c("CEA_MON", "CEA_ANNUAL", "CEA_NEP", "Prayas"), period %in% c(2010:2027)), mapping = aes(x = period, y = value, shape = scenario)) +
+  ## Grey model names on right
+  geom_text(whole_se_wind %>% filter(period == 2030, scen_name == "Delayed action", model_scope == "global") %>% mutate(short_name = substring(model, 1, 1)), mapping = aes(x = 2030.5, y = value * 277.78, label = short_name, fontface = "bold"), color = "grey", size = 3.5) +
+  coord_cartesian(ylim = c(0, 460)) +
+  labs(
+    y = "Power generation from Wind (TWh)"
+  ) +
+  scale_colour_manual(values = myColors, limits = c("AIM/Enduse", "India MARKAL")) +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 14),
+    axis.title.x = element_blank()
+  )
+
+r
+```
+
+
+### Fig. 3: Power generation from gas in 2030 in Delayed action
+```{r}
+whole_se_gas <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Gas"))
+
+whole_se_gas_global <- whole_se_gas %>%
+  filter(period < 2051, model_scope == "global", scen_name == "Delayed action") %>%
+  group_by(period) %>%
+  summarise(minimum = min(value) * 277.78, maximum = max(value) * 277.78)
+
+
+t <- ggplot() +
+  ## Grey lines
+  geom_line(data = whole_se_gas %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "global"), mapping = aes(x = period, y = value * 277.78, group = interaction(model, scen_name)), size = 0.1, color = "grey") +
+  ## Grey ribbons
+  geom_ribbon(whole_se_gas_global %>% filter(period %in% c(2010:2030)), mapping = aes(x = period, ymin = minimum, ymax = maximum), alpha = 0.4, fill = "grey") +
+  ## national models colored dashed
+  geom_line(data = whole_se_gas %>% filter(period %in% c(2010:2030), scen_name == "Delayed action", model_scope == "national"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model), size = 1.5, linetype = 2) +
+  ## historical and projections
+  geom_point(hist_IND %>% filter(variable == "Secondary Energy|Electricity|Gas", model %in% c(
+    "NITI AAYOG",
+    "CEA_NEP"
+  )), mapping = aes(x = period, y = value * 0.001, shape = scenario)) +
+  ## Grey model names on right
+  geom_text(whole_se_gas %>% filter(period == 2030, scen_name == "Delayed action", model_scope == "global") %>% mutate(short_name = substring(model, 1, 1)), mapping = aes(x = 2030.5, y = value * 277.78, label = short_name, fontface = "bold"), color = "grey", size = 3.5) +
+  coord_cartesian(ylim = c(0, 800)) +
+  labs(
+    y = "Power generation from Gas (TWh)"
+  ) +
+  scale_colour_manual(values = myColors, limits = c("AIM/Enduse", "India MARKAL")) +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 14),
+    axis.title.x = element_blank()
+  )
+
+t
+```
+
+
+### Fig. 4: Coal capacity development: natural-retirement pathway and stranded capacity
 
 ```{r}
 strandDelayed <- ggplot() +
@@ -402,7 +485,7 @@ strandDelayed <- ggplot() +
     subtitle = "Delayed action-REMIND"
   ) +
   coord_cartesian(ylim = c(0, 340)) +
-  theme_bw()+
+  theme_bw() +
   theme(axis.text = element_text(size = 10), axis.title.x = element_blank())
 
 strandEarly <- ggplot() +
@@ -415,7 +498,7 @@ strandEarly <- ggplot() +
   ) +
   scale_fill_manual(values = brewer.pal(n = 4, name = "YlOrRd")) +
   coord_cartesian(ylim = c(0, 340)) +
-  theme_bw()+
+  theme_bw() +
   theme(axis.text = element_text(size = 10), axis.title.x = element_blank())
 
 strandDelayed
@@ -423,21 +506,350 @@ strandEarly
 ```
 
 ### Fig. 5: Power generation mix in 2030, early and delayed action and the difference
-
-
-
-### Fig. Secondary Energy Hydro
 ```{r}
-whole_sec_elec_hydro <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Hydro")) 
+plotvar_2 <- c(#"Secondary Energy|Electricity|Biomass|w/ CCS",
+             #"Secondary Energy|Electricity|Biomass|w/o CCS",
+             "Secondary Energy|Electricity|Hydro",
+             "Secondary Energy|Electricity|Nuclear",
+             "Secondary Energy|Electricity|Solar",
+             "Secondary Energy|Electricity|Wind",
+             "Secondary Energy|Electricity|Gas|w/ CCS",
+             "Secondary Energy|Electricity|Gas|w/o CCS",
+             "Secondary Energy|Electricity|Coal|w/ CCS",
+             "Secondary Energy|Electricity|Coal|w/o CCS",
+             NULL)
 
-ggplot()+
-  geom_line(data = whole_sec_elec_hydro %>% filter(period %in% c(2005:2030),scen_name=="Delayed action"), aes(x=period,y=value*277.78,group=interaction(model,scen_name),color=model,linetype=model_scope,size=model_scope))+
-# facet_grid(scen_name~.)+
- labs(
+wholeSeAll<- whole %>%
+  filter(variable %in% plotvar_2) %>%
+  select(model, scen_name, value, period, variable) %>%
+  spread(scen_name, value = value) %>%
+  mutate(difference = `Early action` - `Delayed action`) %>% 
+  gather(4:6, key = "scen_name", value = "value") %>%
+  mutate(scen_name = factor(scen_name, levels = c("Delayed action", "Early action", "difference"))) %>%
+  mutate(model_scope = if_else(model %in% c("AIM/Enduse", "India MARKAL"), "national", "global"))
+
+ggplot() +
+  geom_bar(data = wholeSeAll %>% filter(period == 2030), aes(x = scen_name, y = value * 277.78, group = variable, fill = variable), position = "stack", stat = "identity") +
+  facet_grid(. ~ model, labeller = label_wrap_gen(6, multi_line = TRUE)) +
+  theme_bw()+
+  theme(strip.text.x = element_text(size = 6), axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    x = "",
+    y = "Power Generation in 2030 (TWh) "
+  ) +
+  scale_fill_manual(values = mip::plotstyle(plotvar_2))
+
+```
+
+### Fig. 6 Illustrative coal pathways
+
+```{r}
+remind <- whole_se_elec_coal %>%
+  filter(variable == "Secondary Energy|Electricity|Coal|w/o CCS", model == "REMIND", period %in% c(2020:2070)) %>%
+  select(1, 6, 9, 10)
+
+natural <- ic %>% filter(category %in% c("Sum (operating)", "Sum (op+construction)"))
+
+remind_natural_2030 <- shite.2 %>%
+  group_by(period, model) %>%
+  summarise(total = sum(capacity))
+
+v <- ggplot() +
+  ## early and delayed action from Remind
+  geom_line(remind, mapping = aes(x = period, y = value, group = scen_name, color = scen_name), linetype = "dashed")+
+  # natural retirement pathway for plants currently operating and op + under-construction
+  geom_line(natural %>% filter(period > 2018), mapping = aes(x = period, y = value, group = category, color = category)) +
+  # natural retirement path for early and delayed action
+  geom_line(remind_natural_2030, mapping = aes(x = period, y = total, color = model)) +
+  # historical data
+    geom_line(input.data.2 %>% filter(Status == "Operating", Year > 2015), mapping = aes(x = Year, y = sum / 1000), color = "black")+
+  ##historical data
+    geom_line(hist_IND %>% filter(variable == "Capacity|Electricity|Coal", model == "NITI AAYOG", period < 2016), mapping = aes(x = period, y = value / 1000), color = "black")+
+  scale_color_brewer(palette = "Dark2") +
+   labs(y = "Coal Capacity (GW)") +
+   theme_bw() +
+  theme(axis.title.x = element_blank())
+v
+```
+
+
+### Fig. S1
+Made using tableau
+
+### Fig. S2
+Made using tableau
+
+### Fig. S3
+
+
+### Fig. S4: Final Energy of Electricity
+```{r}
+whole_fe_elec <- whole %>% filter(variable == "Final Energy|Electricity")
+
+# Historical FE
+hist_fe_elec <- hist_and_botmup %>% filter(region == "IND", period %in% c(2005:2015), variable == "FE|Electricity (EJ/yr)")
+
+
+ggplot() +
+  geom_line(data = whole_fe_elec %>% filter(period %in% c(2010:2050)), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model, linetype = model_scope, size = model_scope)) +
+    facet_grid(scen_name~.)+
+  labs(
     x = "Year",
+    y = "Final Energy of Electricity (TWh)",
+ #   title = "Delayed action"
+  ) +
+  theme_bw() +
+  geom_point(hist_IND %>% filter(variable == "Final Energy|Electricity", model %in% c("CEA_growth", "CEA_EXEC")), mapping = aes(y = value * 0.001, x = period, shape = scenario)) +
+  scale_size_manual(values = c(1, 1.5))+
+  scale_colour_manual(values = myColors)
+```
+
+### Fig. S5: Price of Power Generation
+
+```{r}
+whole_ep <- whole %>% filter(variable == "Price|Secondary Energy|Electricity", period %in% c(2010:2100))
+
+ggplot() +
+  geom_line(data = whole_ep %>% filter(period %in% c(2010:2050)), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model, linetype = model_scope, size = model_scope)) +
+    facet_grid(scen_name~.)+
+  labs(
+    x = "Year",
+    y = "Price of Power generation (USD2010/GJ)",
+ #   title = "Delayed action"
+  ) +
+  theme_bw() +
+  scale_size_manual(values = c(1, 1.5)) +
+  scale_colour_manual(values = myColors)
+
+```
+
+Fig. S6: Population
+```{r}
+pop <- whole %>% filter(variable == "Population",
+                        scen_name =="Early action")
+ggplot() +
+  geom_line(data = pop %>% filter(period %in% c(2010:2050)), aes(x = period, y = value * 277.78, color = model, linetype = model_scope, size = model_scope)) +
+  labs(
+  #  x = "Year",
+    y = "Population",
+  ) +
+  theme_bw() +
+   scale_size_manual(values = c(1, 1.5)) +
+  scale_colour_manual(values = myColors)
+
+```
+
+### Fig. S7: GDP in Market Exchange Rate (USD billion 2010)
+```{r}
+loc <- 0.015 # https://www.xe.com/currencycharts/?from=INR&to=USD&view=10Y
+
+whole_gdp <- whole %>% filter(variable == "GDP|MER", period %in% c(2010:2050), scen_name == "Delayed action")
+whole_gdp[whole_gdp$model_scope == "national", ]$value <- whole_gdp[whole_gdp$model_scope == "national", ]$value * loc
+
+ggplot() +
+  geom_line(data = whole_gdp %>% filter(scen_name == "Delayed action"), aes(x = period, y = value, color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  # facet_grid(scen_name~.)+
+  theme_bw() +
+  scale_colour_manual(values = myColors) +
+  labs(y = "GDP|MER (billion US$2010)")
+```
+
+### Fig. S8: Final Energy
+```{r}
+whole_fe <- whole %>% filter(variable == "Final Energy", scen_name == "Delayed action")
+
+ggplot() +
+  geom_line(data = whole_fe %>% filter(period %in% c(2010:2050)), aes(x = period, y = value, color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  theme_bw() +
+  scale_colour_manual(values = myColors) +
+  labs(
+    y = "Final Energy (EJ/yr)",
+    x = "Year"
+  )
+```
+
+### Fig. S9: Carbon Price
+```{r}
+whole_cp <- whole %>% filter(variable == "Price|Carbon", period %in% c(2010:2050), model_scope == "global")
+
+ggplot() +
+  geom_line(data = whole_cp, aes(x = period, y = value, color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  facet_grid(scen_name ~ .) +
+  theme_bw() +
+  scale_colour_manual(values = myColors, limits = unique(whole_cp$model)) +
+  labs(y = "Carbon Price (US$2010/t CO2)", x = "")
+# coord_cartesian(ylim=c(0,600))
+```
+
+### Fig. S10: Power generation from coal without CCS in early action
+```{r}
+wholeCoalEarly <- whole %>% filter(variable == "Secondary Energy|Electricity|Coal|w/o CCS", period %in% c(2005:2050))
+
+ggplot() +
+  geom_line(data = wholeCoalEarly %>% filter(scen_name == "Early action" ), aes(x = period, y = value, color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  # facet_grid(scen_name~.)+
+  theme_bw() +
+  scale_colour_manual(values = myColors) +
+  labs(y = "Power generation from coal without CCS (TWh)")+
+  coord_cartesian(xlim = c(2010,2030))
+
+```
+### Fig. S11: Emissions from energy and electricity sector
+
+```{r}
+## energy sector emissions
+whole_emi <- whole[whole$variable == "Emissions|CO2|Energy", ]
+
+
+ee <- ggplot() +
+  geom_line(whole_emi %>% filter(period %in% c(2010:2050)), mapping = aes(x = period, y = value, group = interaction(modscen, variable), color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  facet_grid(scen_name ~ .) +
+  geom_point(hist_and_botmup %>% filter(region == "IND", period %in% c(2010:2015), variable == "Emi|CO2|Energy (Mt CO2/yr)"), mapping = aes(x = period, y = value, shape = scenario)) +
+  labs(
+    x = "",
+    y = "Emissions from Energy sector (Mt CO2/yr)"
+  ) +
+  theme_bw() +
+  scale_colour_manual(values = myColors)
+
+## electricity sector emissions
+whole_emi_elec <- whole[whole$variable == "Emissions|CO2|Energy|Supply|Electricity", ]
+
+ee2 <- ggplot() +
+  geom_line(whole_emi_elec %>% filter(period %in% c(2010:2050)), mapping = aes(x = period, y = value, group = interaction(modscen, variable), color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  facet_grid(scen_name ~ .) +
+  theme_bw() +
+  geom_point(hist_and_botmup %>% filter(region == "IND", period %in% c(2010:2015), variable == "Emi|CO2|Energy|Supply|Electricity (Mt CO2/yr)"), mapping = aes(x = period, y = value, shape = scenario)) +
+  labs(
+    x = "",
+    y = "Emissions from electricity sector (Mt CO2/yr)"
+  ) +
+  coord_cartesian(ylim = c(0, 2500)) +
+  scale_colour_manual(values = myColors)
+
+ggpubr::ggarrange(ee,ee2,nrow = 1,common.legend = T,legend = "right")
+
+```
+
+
+### Fig. S12 Cumulative emissions from 2016-2030
+```{r}
+### DATA
+whole_emi_energy <- whole %>%
+  filter(variable == "Emissions|CO2|Energy|Supply|Electricity", period %in% c(2015:2050)) %>%
+  group_by(modscen) 
+
+whole_emi_energy <- calcCumulatedDiscount(data = whole_emi_energy,nameVar ="Emissions|CO2|Energy|Supply|Electricity", discount = 0)
+
+whole_emi_dem_tra <- whole %>%
+  filter(variable == "Emissions|CO2|Energy|Demand|Transportation", scen_name != "NDC", period %in% c(2015:2050)) %>%
+  group_by(modscen)
+
+whole_emi_dem_tra <- calcCumulatedDiscount(whole_emi_dem_tra, nameVar = "Emissions|CO2|Energy|Demand|Transportation", discount = 0)
+
+
+whole_emi_dem_ind <- whole %>%
+  filter(variable == "Emissions|CO2|Energy|Demand|Industry", scen_name != "NDC", period %in% c(2015:2050)) %>%
+  group_by(modscen)
+
+
+whole_emi_dem_ind <- calcCumulatedDiscount(whole_emi_dem_ind, nameVar = "Emissions|CO2|Energy|Demand|Industry", discount = 0)
+
+whole_emi_dem_res <- whole %>%
+  filter(variable == "Emissions|CO2|Energy|Demand|Residential and Commercial", scen_name != "NDC", period %in% c(2015:2050)) %>%
+  group_by(modscen)
+
+
+whole_emi_dem_res <- calcCumulatedDiscount(whole_emi_dem_res, nameVar = "Emissions|CO2|Energy|Demand|Residential and Commercial", discount = 0)
+
+
+whole_cum <- rbind(whole_emi_energy, whole_emi_dem_tra, whole_emi_dem_ind, whole_emi_dem_res)
+
+
+
+whole_cum_2 <- whole_cum %>%
+  spread(key = scen_name, value = value) %>%
+  arrange(variable) %>%
+  filter(period != 2010) %>%
+  mutate(`Excess emissions` = `Delayed action` - lead(`Early action`, n = 8, default = `Delayed action`[1])) %>%
+  gather(key = "scen_name", value = "value", c(9:11)) %>% 
+  removeColNa() 
+
+whole_cum_2$variable <- mip::shorten_legend(whole_cum_2$variable, maxchar = 20, identical_only = TRUE)
+
+ggplot() +
+  geom_bar(data = whole_cum_2 %>% filter(period == 2030), aes(x = scen_name, y = value / 1000, fill = variable, group = modscen), position = "stack", stat = "identity") +
+  labs(
+    x = "",
+    y = "Cumulative Emissions (2016-2030) (Gt CO2)",
+    fill = "Scenario Type",
+    alpha = "Model Scope"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_grid(~model, scales = "free", space = "free_x") +
+  theme(strip.text.x = element_text(angle = 90, size = 8), axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+### Fig. S13: Capital Costs of Solar PV
+```{r}
+plotvar <- c("Capital Cost|Electricity|Solar|PV")
+whole_cap_cost <- whole[whole$variable == plotvar, ]
+localrate <- 0.02 # https://www.xe.com/currencycharts/?from=INR&to=USD&view=10Y
+whole_cap_cost[whole_cap_cost$model %in% c("India MARKAL", "AIM/Enduse 3.0"), ]$value <- whole_cap_cost[whole_cap_cost$model %in% c("India MARKAL", "AIM/Enduse 3.0"), ]$value * localrate
+
+
+ggplot() +
+  geom_line(data = whole_cap_cost %>% filter(period %in% c(2010:2050), scen_name == "Delayed action"), aes(x = period, y = value, group = interaction(model, scen_name), color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  labs(
+    y = "Capital Costs for Solar PV (USD2010/KW)",
+    x = ""
+  ) +
+  scale_colour_manual(values = myColors, limits = unique(whole_cap_cost$model)) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 12))
+```
+### Fig. S14: Coal capacity development, assuming natural retirement and colored according to age-group
+
+
+### Fig. S15: Secondary Energy Hydro
+```{r}
+whole_sec_elec_hydro <- whole %>% filter(variable %in% c("Secondary Energy|Electricity|Hydro"))
+
+hydro <- ggplot() +
+  geom_line(data = whole_sec_elec_hydro %>% filter(period %in% c(2005:2030), scen_name == "Delayed action"), aes(x = period, y = value * 277.78, group = interaction(model, scen_name), color = model, linetype = model_scope, size = model_scope)) +
+  # facet_grid(scen_name~.)+
+  labs(
+    x = "",
     y = "Power generation from Hydro (TWh)"
-    )+ theme(strip.text.x = element_text(angle = 90,size = 8),axis.text.x = element_text(angle = 90, hjust = 1))+
-     geom_point(hist_IND %>% group_by(model,variable) %>% filter(variable=="Secondary Energy|Electricity|Hydro", model %in% c("CEA_NEP","OWN"), period%in%c(2005:2027)),mapping = aes(x=period, y= value*0.001,shape=scenario))+
-  scale_size_manual(values=c(1, 1.5))+theme_bw()+
-  scale_colour_manual(values=myColors)
+  ) +
+  theme(strip.text.x = element_text(angle = 90, size = 8), axis.text.x = element_text(angle = 90, hjust = 1)) +
+  geom_point(hist_IND %>% group_by(model, variable) %>% filter(variable == "Secondary Energy|Electricity|Hydro", model %in% c("CEA_NEP", "OWN"), period %in% c(2005:2027)), mapping = aes(x = period, y = value * 0.001, shape = scenario)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  theme_bw() +
+  scale_colour_manual(values = myColors)
+
+whole_nuc <- whole %>% filter(variable == "Capacity|Electricity|Nuclear", scen_name == "Delayed action")
+
+
+nuclear <- ggplot() +
+  geom_line(data = whole_nuc %>% filter(period %in% c(2010:2050)), aes(x = period, y = value, color = model, linetype = model_scope, size = model_scope)) +
+  scale_size_manual(values = c(1, 1.5)) +
+  # facet_grid(scen_name~.)+
+  geom_point(data = hist_IND %>% filter(variable == "Capacity|Electricity|Nuclear", model %in% c("CEA_ANNUAL", "CEA_NEP"), period %in% c(2010:2050)), mapping = aes(x = period, y = value / 1000, shape = scenario)) +
+  coord_cartesian(ylim = c(0, 60), xlim = c(2010, 2030)) +
+  theme_bw() +
+  scale_colour_manual(values = myColors) +
+  labs(
+    y = "Nuclear Capacity (GW)",
+    x = ""
+  )
+
+ggpubr::ggarrange(hydro, nuclear, common.legend = T, legend = "right")
 ``````
